@@ -3,6 +3,7 @@ use embassy_sync::pubsub::PubSubChannel;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use heapless::String;
 
+// TODO: Hide event channels and task behind features
 // SENSORS
 #[derive(Clone, Copy, Debug, Format)]
 pub enum Measurements {
@@ -59,7 +60,6 @@ pub enum Actuators {
     Humidifier,
 }
 
-
 impl Actuators {
     fn from_str(s: &str) -> Result<Self, ()> {
         match s {
@@ -103,7 +103,7 @@ pub const COMMAND_CH_PUB: usize = 1;
 pub const COMMAND_CH_SUB: usize = 1;
 pub static COMMAND_CH: PubSubChannel<CriticalSectionRawMutex, Command, COMMAND_CH_CAP, COMMAND_CH_SUB, COMMAND_CH_PUB> = PubSubChannel::new();
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Format)]
 pub struct SensorState {
     pub temperature: Option<f32>,
     pub humidity: Option<f32>,
@@ -134,6 +134,10 @@ impl SensorState {
                 self.tds = Some(t);
             }
         }
+    }
+
+    pub fn clean(&mut self) {
+        *self = Self { temperature: None, humidity: None, pressure: None, lux: None, ph: None, tds: None };
     }
 }
 
@@ -223,6 +227,53 @@ impl SensorState {
 
         let _ = write!(buf, "}}");
     }
+}
+
+// Events to send
+#[cfg(any(feature = "mqtt", feature = "http-api", feature = "ble", feature = "sensors"))]
+pub mod telemetry {
+    use defmt::Format;
+    use embassy_sync::{
+        blocking_mutex::raw::CriticalSectionRawMutex,
+        pubsub::PubSubChannel,
+    };
+    use crate::events::{Measurements, SensorState};
+
+    #[derive(Copy, Clone, Format)]
+    pub enum TelemetryMessage {
+        SendOne(Measurements),
+        SendAll(SensorState),
+    }
+
+    const fn enable_features() -> usize {
+        let mut counter = 0;
+
+        if cfg!(feature = "mqtt") {
+            counter += 1;
+        }
+
+        if cfg!(feature = "http-api") {
+            counter += 1;
+        }
+
+        if cfg!(feature = "ble") {
+            counter += 1;
+        }
+
+        counter
+    }
+
+    pub const TELEMETRY_CH_CAP: usize = 8;
+    pub const TELEMETRY_CH_SUB: usize = enable_features();
+    pub const TELEMETRY_CH_PUB: usize = 1;
+
+    pub static TELEMETRY_CH: PubSubChannel<
+        CriticalSectionRawMutex,
+        TelemetryMessage,
+        TELEMETRY_CH_CAP,
+        TELEMETRY_CH_SUB,
+        TELEMETRY_CH_PUB,
+    > = PubSubChannel::new();
 }
 
 /* FUTURE PLANS
