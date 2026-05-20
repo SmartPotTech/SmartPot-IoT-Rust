@@ -12,7 +12,7 @@ use embassy_sync::pubsub::DynPublisher;
 use crate::events::Measurements;
 use bh1750_embedded::r#async::Bh1750Async;
 use bh1750_embedded::Resolution;
-use esp_hal::analog::adc::{Adc, AdcConfig};
+use esp_hal::analog::adc::Adc;
 use esp_hal::peripherals::{GPIO34, GPIO35};
 use crate::drivers::tca9548a::{Tca9548a, TcaChannel};
 
@@ -184,7 +184,7 @@ pub async fn tds_task(
 
         sensor_channel.publish_immediate(Measurements::TDS(tds_value));
 
-        let value: u16 = nb::block!(adc.read_oneshot(&mut tds)).unwrap();
+        let value: u16 = nb::block!(adc.read_oneshot(&mut ph)).unwrap();
         let ph_value = ph_from_adc(value, temperature);
 
         sensor_channel.publish_immediate(Measurements::PH(ph_value));
