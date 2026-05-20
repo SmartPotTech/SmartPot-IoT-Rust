@@ -24,7 +24,7 @@ use embassy_net::{DhcpConfig, StackResources};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pubsub::PubSubChannel;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
-
+use esp_hal::analog::adc::{Adc, AdcConfig, Attenuation};
 use smt_api_client::drivers::tca9548a::Tca9548a;
 use smt_api_client::events::{Measurements, SENSOR_CH, COMMAND_CH};
 use smt_api_client::tasks::wifi::{net_task, telemetry_task, wifi_connection_task};
@@ -86,7 +86,16 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     let sda = peripherals.GPIO21;
     let scl = peripherals.GPIO22;
 
-    // actuators piout
+    // Analog
+    let tds_pin = peripherals.GPIO34;
+    let mut adc1_config = AdcConfig::default();
+    let mut tds = adc1_config.enable_pin(tds_pin, Attenuation::_11dB);
+
+    let ph_pin = peripherals.GPIO35;
+    let mut ph = adc1_config.enable_pin(ph_pin, Attenuation::_11dB);
+    let mut adc_tds = Adc::new(peripherals.ADC1, adc1_config);
+
+    // actuators pinout
     let water_pin = peripherals.GPIO25;
     let lights_pin = peripherals.GPIO26;
     let humidifier_pin = peripherals.GPIO5;
@@ -101,23 +110,6 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
             .with_sda(sda)
             .into_async();
         let _i2c_bus = I2C_BUS.init(Mutex::new(i2c));
-
-        #[cfg(feature = "actuators")]
-        {
-            use esp_hal::gpio::{Output, OutputConfig, Level};
-
-            let mut water = Output::new(water_pin, Level::High, OutputConfig::default());
-            let mut lights = Output::new(lights_pin, Level::High, OutputConfig::default());
-            let mut humidifier = Output::new(humidifier_pin, Level::High, OutputConfig::default());
-
-            _spawner.spawn(smt_api_client::tasks::command::catch_commands(
-                COMMAND_CH.dyn_subscriber().unwrap(),
-                water,
-                lights,
-                humidifier
-            ).expect("Failed to create catch_commands task"));
-        }
-
 
         #[cfg(feature = "sensors")]
         {
@@ -134,6 +126,29 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
                 I2cDevice::new(_i2c_bus),
                 SENSOR_CH.dyn_publisher().unwrap()
             ).expect("Failed to launch bh1750_sensors task"));
+
+            _spawner.spawn(smt_api_client::tasks::sensors::tds_task(
+                adc_tds,
+                tds,
+                ph,
+                SENSOR_CH.dyn_publisher().unwrap()
+            ).expect("Failed to launch tds task"));
+        }
+
+        #[cfg(feature = "actuators")]
+        {
+            use esp_hal::gpio::{Output, OutputConfig, Level};
+
+            let mut water = Output::new(water_pin, Level::Low, OutputConfig::default());
+            let mut lights = Output::new(lights_pin, Level::Low, OutputConfig::default());
+            let mut humidifier = Output::new(humidifier_pin, Level::Low, OutputConfig::default());
+
+            _spawner.spawn(smt_api_client::tasks::command::catch_commands(
+                COMMAND_CH.dyn_subscriber().unwrap(),
+                water,
+                lights,
+                humidifier
+            ).expect("Failed to create catch_commands task"));
         }
 
 
@@ -202,7 +217,7 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
         let stack_resources = STACK_RESOURCES.init_with(|| StackResources::<5>::new());
 
         let mut trng_buf = [0u8; 16];
-        let _trng_source = TrngSource::new(peripherals.RNG, peripherals.ADC1.reborrow());
+        // let _trng_source = TrngSource::new(peripherals.RNG, peripherals.ADC1.reborrow());
         let trng = Trng::try_new().unwrap();
         trng.read(&mut trng_buf);
 

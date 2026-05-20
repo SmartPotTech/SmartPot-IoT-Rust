@@ -1,5 +1,6 @@
 extern crate alloc; // Necesario para alloc::format
 
+use crate::events::SensorState;
 use core::num::NonZero;
 use core::net::SocketAddrV4;
 use defmt::{info, error, warn};
@@ -23,7 +24,7 @@ use heapless::{String, Vec};
 use crate::events::{Command, Measurements, SENSOR_CH_CAP};
 
 // BROKER
-const BROKER_IP: &str = "192.168.58.176"; // broker.emqx.io TODO: impl dns if using domain name
+const BROKER_IP: &str = "192.168.58.176"; // 35.172.255.228 broker.emqx.io TODO: impl dns if using domain name
 const BROKER_PORT: u16 = 8883;
 
 // MQTT TOPICS
@@ -99,7 +100,7 @@ pub async fn mqtt_task(stack: Stack<'static>, rng: esp_hal::rng::Trng, mut senso
         let topic_base = alloc::format!(
             "{}{}/",
             TOPIC_PREFIX,
-            stack.hardware_address()
+            "672ebd43e9227768a15b11df" // stack.hardware_address()
         );
         let bind = alloc::format!("{}commands", topic_base);
         let topic_commands = TopicName::new(
@@ -120,7 +121,7 @@ pub async fn mqtt_task(stack: Stack<'static>, rng: esp_hal::rng::Trng, mut senso
 
         loop {
             // Poll (keep connection alive and receive messages from topics)
-            match select(client.poll(), Timer::after(Duration::from_secs(5))).await {
+            match select(client.poll(), Timer::after(Duration::from_secs(20))).await {
                 Either::First(poll) => {
                     if let Ok(event) = poll {
                         match &event {
@@ -152,6 +153,37 @@ pub async fn mqtt_task(stack: Stack<'static>, rng: esp_hal::rng::Trng, mut senso
                 Either::Second(_) => {
                     // TODO: This code is copied from telemetry task in wifi.rs
                     // TODO: wrap in a feature
+
+
+                    let mut sensor_state = SensorState::default();
+
+                    while let Some(m) = sensor_channel.try_next_message_pure() {
+                        sensor_state.update(m);
+                    }
+
+                    let mut payload: heapless::String<512> =
+                        heapless::String::new();
+
+                    sensor_state.to_json(&mut payload);
+
+                    let topic_sensor = TopicName::new(
+                        MqttString::from_str(&topic_sensors_base).unwrap()
+                    ).unwrap();
+
+                    let topic_reference = TopicReference::Name(topic_sensor);
+                    let pub_options = PublicationOptions::new(topic_reference);
+
+                    if let Err(e) = client.publish(
+                        &pub_options,
+                        rust_mqtt::Bytes::Borrowed(payload.as_bytes()),
+                    ).await {
+                        error!("[MQTT] Publish failed: {:?}", e);
+                        break;
+                    } else {
+                        info!("[MQTT] Published at {}: {}", topic_sensors_base.as_str(), payload.as_str());
+                    }
+
+                    /*
                     let mut measures: Vec<Measurements, SENSOR_CH_CAP> = Vec::new();
                     for _ in 0..SENSOR_CH_CAP {
                         match sensor_channel.try_next_message_pure() {
@@ -161,10 +193,12 @@ pub async fn mqtt_task(stack: Stack<'static>, rng: esp_hal::rng::Trng, mut senso
                     }
 
                     for m in &measures {
+
                         let sensor_topic_str = alloc::format!("{}/{}", topic_sensors_base, m.get_topic());
                         let topic_sensor = TopicName::new(
                             MqttString::from_str(&sensor_topic_str).unwrap()
                         ).unwrap();
+
 
                         let mut payload: String<255> = String::new();
                         m.to_json(&mut payload);
@@ -182,6 +216,8 @@ pub async fn mqtt_task(stack: Stack<'static>, rng: esp_hal::rng::Trng, mut senso
                             info!("[MQTT] Published at {}: {}", sensor_topic_str.as_str(), payload.as_str());
                         }
                     }
+
+                     */
                 }
             }
         }
