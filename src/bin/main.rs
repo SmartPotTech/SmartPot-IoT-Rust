@@ -26,8 +26,14 @@ use embassy_sync::pubsub::PubSubChannel;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use esp_hal::analog::adc::{Adc, AdcConfig, Attenuation};
 use smt_api_client::drivers::tca9548a::Tca9548a;
-use smt_api_client::events::{Measurements, SENSOR_CH, COMMAND_CH};
-use smt_api_client::tasks::wifi::{net_task, telemetry_task, wifi_connection_task};
+
+#[cfg(feature = "sensors")]
+use smt_api_client::events::SENSOR_CH;
+
+#[cfg(feature = "actuators")]
+use smt_api_client::events::{COMMAND_CH};
+
+
 extern crate alloc;
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
@@ -67,7 +73,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 async fn main(spawner: embassy_executor::Spawner) -> ! {
     // generator version: 1.1.0
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
-    let mut peripherals = esp_hal::init(config);
+    let peripherals = esp_hal::init(config);
     //esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 120000);
     esp_alloc::heap_allocator!(size: 98768);
 
@@ -87,13 +93,13 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     let scl = peripherals.GPIO22;
 
     // Analog
-    let tds_pin = peripherals.GPIO34;
     let mut adc1_config = AdcConfig::default();
-    let mut tds = adc1_config.enable_pin(tds_pin, Attenuation::_11dB);
+    let tds_pin = peripherals.GPIO34;
+    let tds = adc1_config.enable_pin(tds_pin, Attenuation::_11dB);
 
     let ph_pin = peripherals.GPIO35;
-    let mut ph = adc1_config.enable_pin(ph_pin, Attenuation::_11dB);
-    let mut adc_tds = Adc::new(peripherals.ADC1, adc1_config);
+    let ph = adc1_config.enable_pin(ph_pin, Attenuation::_11dB);
+    let adc_tds = Adc::new(peripherals.ADC1, adc1_config);
 
     // actuators pinout
     let water_pin = peripherals.GPIO25;
@@ -139,9 +145,9 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
         {
             use esp_hal::gpio::{Output, OutputConfig, Level};
 
-            let mut water = Output::new(water_pin, Level::Low, OutputConfig::default());
-            let mut lights = Output::new(lights_pin, Level::Low, OutputConfig::default());
-            let mut humidifier = Output::new(humidifier_pin, Level::Low, OutputConfig::default());
+            let water = Output::new(water_pin, Level::Low, OutputConfig::default());
+            let lights = Output::new(lights_pin, Level::Low, OutputConfig::default());
+            let humidifier = Output::new(humidifier_pin, Level::Low, OutputConfig::default());
 
             _spawner.spawn(smt_api_client::tasks::command::catch_commands(
                 COMMAND_CH.dyn_subscriber().unwrap(),
@@ -150,8 +156,6 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
                 humidifier
             ).expect("Failed to create catch_commands task"));
         }
-
-
 
         /*
         let tca = Tca9548a::new(i2c_bus, 0x70);
@@ -198,6 +202,14 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
 
     #[cfg(feature = "wifi")]
     {
+        use smt_api_client::tasks::wifi::{net_task, wifi_connection_task};
+
+        #[cfg(any(feature = "sensors", feature = "actuators", feature = "mqtt", feature = "http-api", feature = "ble"))]
+        use smt_api_client::{
+            events::telemetry::TELEMETRY_CH,
+            tasks::wifi::telemetry_task
+        };
+
         //
         // WIFI INITIALIZATION
         //
@@ -234,14 +246,6 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
         //  Spawn tasks (Telemetry and radio connections)
         //
 
-        // Pub Sub Channel between telemtry and Communications tasks
-
-        static DIVIDE_TO_EXTERIOR_CHANNEL: ConstStaticCell<
-            PubSubChannel<CriticalSectionRawMutex, Measurements, 16, 4, 1>,
-        > = ConstStaticCell::new(PubSubChannel::new());
-        let dtec = DIVIDE_TO_EXTERIOR_CHANNEL.take();
-
-
         spawner.spawn(net_task(runner).expect("Error in net_task"));
         spawner.spawn(
             wifi_connection_task(wifi_controller, SSID, PASSWORD)
@@ -250,22 +254,24 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
         spawner.spawn(
             telemetry_task(
                 SENSOR_CH.dyn_subscriber().unwrap(),
-                dtec.dyn_publisher().unwrap(),
+                TELEMETRY_CH.dyn_publisher().unwrap(),
             )
             .expect("Error in telemetry"),
         );
 
-        #[cfg(feature = "http-api")]
+        // HTTP (DISABLE)
+        #[cfg(all(feature = "http-api", feature = "sensors"))]
         spawner.spawn(smt_api_client::tasks::wifi::http_api_task(
             _stack,
             dtec.dyn_subscriber().unwrap(),
         ));
 
-        #[cfg(feature = "mqtt")]
+        // MQTT
+        #[cfg(all(feature = "mqtt", feature = "actuators", feature = "sensors"))]
         spawner.spawn(smt_api_client::tasks::mqtt::mqtt_task(
             _stack,
             trng.clone(),
-            SENSOR_CH.dyn_subscriber().unwrap(),
+            TELEMETRY_CH.dyn_subscriber().unwrap(),
             COMMAND_CH.dyn_publisher().unwrap()
         ).expect("Error Running MQTT task"));
     }
