@@ -43,7 +43,7 @@ impl Measurements {
     }
 }
 
-pub const SENSOR_CH_CAP: usize = 8;
+pub const SENSOR_CH_CAP: usize = 32;
 pub const SENSOR_CH_PUB: usize = 4;
 pub const SENSOR_CH_SUB: usize = 2;
 pub static SENSOR_CH: PubSubChannel<CriticalSectionRawMutex, Measurements, SENSOR_CH_CAP, SENSOR_CH_SUB, SENSOR_CH_PUB> = PubSubChannel::new();
@@ -102,6 +102,128 @@ pub const COMMAND_CH_CAP: usize = 8;
 pub const COMMAND_CH_PUB: usize = 1;
 pub const COMMAND_CH_SUB: usize = 1;
 pub static COMMAND_CH: PubSubChannel<CriticalSectionRawMutex, Command, COMMAND_CH_CAP, COMMAND_CH_SUB, COMMAND_CH_PUB> = PubSubChannel::new();
+
+#[derive(Clone, Copy, Default)]
+pub struct SensorState {
+    pub temperature: Option<f32>,
+    pub humidity: Option<f32>,
+    pub pressure: Option<f32>,
+    pub lux: Option<f32>,
+    pub ph: Option<f32>,
+    pub tds: Option<f32>,
+}
+
+impl SensorState {
+    pub fn update(&mut self, measurement: Measurements) {
+        match measurement {
+            Measurements::BME280((t, h, p)) => {
+                self.temperature = Some(t);
+                self.humidity = Some(h);
+                self.pressure = Some(p);
+            }
+
+            Measurements::BH1750(l) => {
+                self.lux = Some(l);
+            }
+
+            Measurements::PH(p) => {
+                self.ph = Some(p);
+            }
+
+            Measurements::TDS(t) => {
+                self.tds = Some(t);
+            }
+        }
+    }
+}
+
+impl SensorState {
+    pub fn to_json<const N: usize>(
+        &self,
+        buf: &mut heapless::String<N>,
+    ) {
+        use core::fmt::Write;
+
+        fn write_opt<const N: usize>(
+            buf: &mut heapless::String<N>,
+            value: Option<f32>,
+        ) {
+            match value {
+                Some(v) => {
+                    let _ = write!(buf, "{}", v);
+                }
+                None => {
+                    let _ = write!(buf, "null");
+                }
+            }
+        }
+
+        let _ = write!(buf, "{{");
+
+        //
+        // LUX
+        //
+        match self.lux {
+            Some(v) => {
+                let _ = write!(
+                    buf,
+                    "\"lux\":{},",
+                    v
+                );
+            }
+            None => {
+                let _ = write!(buf, "\"lux\":null,");
+            }
+        }
+
+        //
+        // BME280
+        //
+
+        let _ = write!(buf, "\"temperature\":");
+        write_opt(buf, self.temperature);
+
+        let _ = write!(buf, ",\"humidity\":");
+        write_opt(buf, self.humidity);
+
+        let _ = write!(buf, ",\"pressure\":");
+        write_opt(buf, self.pressure);
+        let _ = write!(buf, ",");
+        //
+        // TDS
+        //
+        match self.tds {
+            Some(v) => {
+                let _ = write!(
+                    buf,
+                    "\"tds\":{},",
+                    v
+                );
+            }
+            None => {
+                let _ = write!(buf, "\"tds\":null,");
+            }
+        }
+
+        //
+        // PH
+        //
+        match self.ph {
+            Some(v) => {
+                let _ = write!(
+                    buf,
+                    "\"ph\":{}",
+                    v
+                );
+            }
+            None => {
+                let _ = write!(buf, "\"ph\":null");
+            }
+        }
+
+        let _ = write!(buf, "}}");
+    }
+}
 
 /* FUTURE PLANS
 pub enum SystemServices {
