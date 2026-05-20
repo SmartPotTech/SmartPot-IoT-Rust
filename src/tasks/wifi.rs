@@ -1,4 +1,6 @@
+use crate::events::SensorState;
 use defmt::{info, warn, debug};
+use embassy_futures::select::{select, Either};
 use esp_radio::wifi::{Config, Interface};
 use esp_radio::wifi::sta::StationConfig;
 use esp_radio::wifi::scan::ScanConfig;
@@ -6,8 +8,8 @@ use esp_radio::wifi::WifiController;
 use embassy_net::{Runner, /*Stack*/};
 use embassy_time::{Duration, Timer};
 use embassy_sync::pubsub::{DynPublisher, DynSubscriber};
-use heapless::{Vec};
-use crate::events::{Measurements, SENSOR_CH_CAP};
+use crate::events::{Measurements};
+use crate::events::telemetry::TelemetryMessage;
 
 #[embassy_executor::task]
 pub async fn net_task(mut runner: Runner<'static, Interface<'static>>) {
@@ -130,25 +132,27 @@ async fn make_request(client: &mut HttpClient<'_, TcpClient<'_, 1, 4096, 4096>, 
 */
 
 #[embassy_executor::task]
-pub async fn telemetry_task(mut sensors_channel: DynSubscriber<'static, Measurements>, connection_channel: DynPublisher<'static, Measurements>) {
+pub async fn telemetry_task(mut sensors_channel: DynSubscriber<'static, Measurements>, telemetry_channel: DynPublisher<'static, TelemetryMessage>) {
     info!("Telemetry task started");
+
+    let mut sensor_state = SensorState::default();
+    let mut snapshot_timer = Timer::after(Duration::from_secs(60));
+
     loop {
-
-        let mut measures: Vec<Measurements, SENSOR_CH_CAP> = Vec::new();
-        while let Some(m) = sensors_channel.try_next_message_pure() {
-            let _ = measures.push(m);
-        }
-
-        if !measures.is_empty() {
-            debug!("Telemetry: Measures received: {}", measures.len());
-            for m in &measures {
-                debug!("\t{:?}", m);
+        match select(
+            sensors_channel.next_message_pure(),
+            &mut snapshot_timer
+        ).await {
+            Either::First(m) => {
+                sensor_state.update(m);
+                telemetry_channel.publish(TelemetryMessage::SendOne(m)).await;
             }
-            connection_channel.publish(measures[0]).await;
-        } else {
-            debug!("No measurements found");
-        }
 
-        Timer::after(Duration::from_secs(1)).await;
+            Either::Second(_) => {
+                telemetry_channel.publish_immediate(TelemetryMessage::SendAll(sensor_state));
+                sensor_state.clean();
+                snapshot_timer = Timer::after(Duration::from_secs(60));
+            }
+        }
     }
 }
