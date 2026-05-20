@@ -1,6 +1,5 @@
 extern crate alloc; // Necesario para alloc::format
 
-use crate::events::SensorState;
 use core::num::NonZero;
 use core::net::SocketAddrV4;
 use defmt::{info, error, warn};
@@ -20,8 +19,9 @@ use rust_mqtt::buffer::AllocBuffer;
 use rust_mqtt::client::event::Event;
 use rust_mqtt::client::options::TopicReference;
 use rust_mqtt::config::KeepAlive;
-use heapless::{String, Vec};
-use crate::events::{Command, Measurements, SENSOR_CH_CAP};
+use heapless::{String};
+use crate::events::{Command};
+use crate::events::telemetry::TelemetryMessage;
 
 // BROKER
 const BROKER_IP: &str = "192.168.58.176"; // 35.172.255.228 broker.emqx.io TODO: impl dns if using domain name
@@ -30,11 +30,16 @@ const BROKER_PORT: u16 = 8883;
 // MQTT TOPICS
 const TOPIC_PREFIX: &str = "smartpot/v1/";
 
-// TODO: separate task responsabilities
+// TODO: separate task responsibilities
 // TODO: Topic array with FnOne to handle
 
 #[task]
-pub async fn mqtt_task(stack: Stack<'static>, rng: esp_hal::rng::Trng, mut sensor_channel: DynSubscriber<'static, Measurements>, commands_channel: DynPublisher<'static, Command>) {
+pub async fn mqtt_task(
+    stack: Stack<'static>,
+    rng: esp_hal::rng::Trng,
+    mut telemetry_channel: DynSubscriber<'static, TelemetryMessage>,
+    commands_channel: DynPublisher<'static, Command>)
+{
     stack.wait_config_up().await;
 
     let mut rx_buffer = [0u8; 4096];
@@ -151,37 +156,56 @@ pub async fn mqtt_task(stack: Stack<'static>, rng: esp_hal::rng::Trng, mut senso
                     }
                 },
                 Either::Second(_) => {
-                    // TODO: This code is copied from telemetry task in wifi.rs
                     // TODO: wrap in a feature
+                    while let Some(message_type) = telemetry_channel.try_next_message_pure() {
+                        let mut payload: String<255> = String::new();
+                        match message_type {
+                            TelemetryMessage::SendOne(m) => {
+                                let sensor_topic_str =
+                                    alloc::format!("{}/{}", topic_sensors_base, m.get_topic());
 
+                                let topic_sensor = TopicName::new(
+                                    MqttString::from_str(&sensor_topic_str).unwrap()
+                                ).unwrap();
 
-                    let mut sensor_state = SensorState::default();
+                                m.to_json(&mut payload);
 
-                    while let Some(m) = sensor_channel.try_next_message_pure() {
-                        sensor_state.update(m);
+                                let topic_reference = TopicReference::Name(topic_sensor);
+                                let pub_options = PublicationOptions::new(topic_reference);
+
+                                if let Err(e) = client.publish(
+                                    &pub_options,
+                                    rust_mqtt::Bytes::Borrowed(payload.as_bytes()),
+                                ).await {
+                                    error!("[MQTT] Publish failed: {:?}", e);
+                                    break;
+                                }
+                                info!("[MQTT] Published at {}: {}", sensor_topic_str.as_str(), payload.as_str());
+                            }
+
+                            TelemetryMessage::SendAll(sensor_state) => {
+                                sensor_state.to_json(&mut payload);
+
+                                let topic_sensor = TopicName::new(
+                                    MqttString::from_str(&topic_sensors_base).unwrap()
+                                ).unwrap();
+
+                                let topic_reference = TopicReference::Name(topic_sensor);
+                                let pub_options = PublicationOptions::new(topic_reference);
+
+                                if let Err(e) = client.publish(&pub_options,  rust_mqtt::Bytes::Borrowed(payload.as_bytes()),
+                                ).await {
+                                    error!("[MQTT] Publish failed: {:?}", e);
+                                    break;
+                                }
+
+                                info!("[MQTT] Published at {}: {}", topic_sensors_base.as_str(), payload.as_str());
+                            }
+                        }
                     }
 
-                    let mut payload: heapless::String<512> =
-                        heapless::String::new();
 
-                    sensor_state.to_json(&mut payload);
 
-                    let topic_sensor = TopicName::new(
-                        MqttString::from_str(&topic_sensors_base).unwrap()
-                    ).unwrap();
-
-                    let topic_reference = TopicReference::Name(topic_sensor);
-                    let pub_options = PublicationOptions::new(topic_reference);
-
-                    if let Err(e) = client.publish(
-                        &pub_options,
-                        rust_mqtt::Bytes::Borrowed(payload.as_bytes()),
-                    ).await {
-                        error!("[MQTT] Publish failed: {:?}", e);
-                        break;
-                    } else {
-                        info!("[MQTT] Published at {}: {}", topic_sensors_base.as_str(), payload.as_str());
-                    }
 
                     /*
                     let mut measures: Vec<Measurements, SENSOR_CH_CAP> = Vec::new();
