@@ -1,5 +1,8 @@
+use esp_hal::analog::adc::AdcPin;
+use esp_hal::peripherals::ADC1;
 use defmt::{info, error, debug};
 use esp_hal::{i2c::master::I2c, Async};
+use esp_hal::Blocking;
 use embassy_executor::task;
 use embassy_time::{Timer, Duration};
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
@@ -9,6 +12,8 @@ use embassy_sync::pubsub::DynPublisher;
 use crate::events::Measurements;
 use bh1750_embedded::r#async::Bh1750Async;
 use bh1750_embedded::Resolution;
+use esp_hal::analog::adc::{Adc, AdcConfig};
+use esp_hal::peripherals::{GPIO34, GPIO35};
 use crate::drivers::tca9548a::{Tca9548a, TcaChannel};
 
 // TODO: dynamic recon of devices
@@ -51,7 +56,7 @@ pub async fn bme280_sequential_task(tca: Tca9548a<I2c<'static, Async>> , sensor_
             }
         }
 
-        Timer::after(Duration::from_secs(20)).await;
+        Timer::after(Duration::from_secs(10)).await;
     }
 }
 
@@ -113,6 +118,76 @@ pub async fn bh1750_task(i2c_bus: I2cDevice<'static, NoopRawMutex, I2c<'static, 
 
         debug!("Sending BH1750 lux measure {}", lux);
         sensor_channel.publish_immediate(Measurements::BH1750(lux));
+
+        Timer::after(Duration::from_secs(10)).await;
+    }
+}
+
+pub fn tds_from_adc(
+    adc_value: u16,
+    temperature: f32,
+) -> f32 {
+    const VREF: f32 = 3.3;
+
+    // ADC ESP32 12 bits
+    let voltage =
+        adc_value as f32 * VREF / 4095.0;
+
+    // Compensación temperatura
+    let compensation_coefficient =
+        1.0 + 0.02 * (temperature - 25.0);
+
+    let compensation_voltage =
+        voltage / compensation_coefficient;
+
+    // Fórmula TDS
+    (
+        133.42 * compensation_voltage*compensation_voltage*compensation_voltage
+            - 255.86 * compensation_voltage*compensation_voltage
+            + 857.39 * compensation_voltage
+    ) * 0.5
+}
+
+pub fn ph_from_adc(
+    adc_value: u16,
+    temperature: f32,
+) -> f32 {
+    const VREF: f32 = 3.3;
+
+    // ADC ESP32 12 bits
+    let voltage =
+        adc_value as f32 * VREF / 4095.0;
+
+    // Compensación temperatura
+    let compensation_coefficient =
+        1.0 + 0.02 * (temperature - 25.0);
+
+    let compensated_voltage =
+        voltage / compensation_coefficient;
+
+    // Conversión pH
+    7.0 + ((2.5 - compensated_voltage) / 0.18)
+}
+
+#[task]
+pub async fn tds_task(
+    mut adc: Adc<'static, ADC1<'static>, Blocking>,
+    mut tds: AdcPin<GPIO34<'static>, ADC1<'static>>,
+    mut ph: AdcPin<GPIO35<'static>, ADC1<'static>>,
+    sensor_channel: DynPublisher<'static, Measurements>,
+) {
+    let temperature: f32 = 25.0;
+
+    loop {
+        let value: u16 = nb::block!(adc.read_oneshot(&mut tds)).unwrap();
+        let tds_value = tds_from_adc(value, temperature);
+
+        sensor_channel.publish_immediate(Measurements::TDS(tds_value));
+
+        let value: u16 = nb::block!(adc.read_oneshot(&mut tds)).unwrap();
+        let ph_value = ph_from_adc(value, temperature);
+
+        sensor_channel.publish_immediate(Measurements::PH(ph_value));
 
         Timer::after(Duration::from_secs(10)).await;
     }
