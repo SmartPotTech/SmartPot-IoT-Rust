@@ -7,12 +7,14 @@ default-run = "smt-api-client"
 
 [features]
 default = ["mqtt", "wifi", "sensors", "actuators"]
-actuators = []
 sensors = []
+actuators = []
+
+wifi = []
 http-api = []
 mqtt = []
 ble = []
-wifi = []
+
 
 [[bin]]
 name = "smt-api-client"
