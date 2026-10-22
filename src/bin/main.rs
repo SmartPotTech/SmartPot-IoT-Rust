@@ -10,7 +10,7 @@
 use defmt::{debug, info};
 use esp_hal::clock::CpuClock;
 use esp_hal::interrupt::software::SoftwareInterruptControl;
-use esp_hal::rng::{ Trng, TrngSource};
+use esp_hal::rng::{Trng, TrngSource};
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::{Async, i2c::master::{Config, I2c}, };
 use esp_println::{self as _, println};
@@ -25,14 +25,13 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pubsub::PubSubChannel;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use esp_hal::analog::adc::{Adc, AdcConfig, Attenuation};
-use smt_api_client::drivers::tca9548a::Tca9548a;
+use smartpot_iot::drivers::tca9548a::Tca9548a;
 
 #[cfg(feature = "sensors")]
-use smt_api_client::events::SENSOR_CH;
+use smartpot_iot::events::SENSOR_CH;
 
 #[cfg(feature = "actuators")]
-use smt_api_client::events::{COMMAND_CH};
-
+use smartpot_iot::events::{COMMAND_CH};
 
 extern crate alloc;
 
@@ -43,12 +42,11 @@ esp_bootloader_esp_idf::esp_app_desc!();
 pub const SSID: &str = env!("SSID");
 pub const PASSWORD: &str = env!("PASSWORD");
 
-
-#[unsafe(no_mangle)]
-pub extern "C" fn __esp_radio_printf() -> core::ffi::c_int {
-    // TODO: quitar este machetazo de la feature "print-logs-from-driver" de esp-radio
-    0
-}
+//#[unsafe(no_mangle)]
+//pub extern "C" fn __esp_radio_printf() -> core::ffi::c_int {
+//    // TODO: quitar este machetazo de la feature "print-logs-from-driver" de esp-radio
+//    0
+//}
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
@@ -120,20 +118,20 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
         #[cfg(feature = "sensors")]
         {
             // i2c scanner
-            _spawner.spawn(smt_api_client::i2c_scanner::scan_i2c(I2cDevice::new(_i2c_bus)).expect("Failed to scan I2C task"));
+            _spawner.spawn(smartpot_iot::i2c_scanner::scan_i2c(I2cDevice::new(_i2c_bus)).expect("Failed to scan I2C task"));
 
             let tca = Tca9548a::new(_i2c_bus, 0x70);
-            _spawner.spawn(smt_api_client::tasks::sensors::bme280_sequential_task(
+            _spawner.spawn(smartpot_iot::tasks::sensors::bme280_sequential_task(
                 tca,
                 SENSOR_CH.dyn_publisher().unwrap(),
             ).expect("Failed to launch bme280 sensors task"));
 
-            _spawner.spawn(smt_api_client::tasks::sensors::bh1750_task(
+            _spawner.spawn(smartpot_iot::tasks::sensors::bh1750_task(
                 I2cDevice::new(_i2c_bus),
                 SENSOR_CH.dyn_publisher().unwrap()
             ).expect("Failed to launch bh1750_sensors task"));
 
-            _spawner.spawn(smt_api_client::tasks::sensors::tds_task(
+            _spawner.spawn(smartpot_iot::tasks::sensors::tds_task(
                 adc_tds,
                 tds,
                 ph,
@@ -149,7 +147,7 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
             let lights = Output::new(lights_pin, Level::Low, OutputConfig::default());
             let humidifier = Output::new(humidifier_pin, Level::Low, OutputConfig::default());
 
-            _spawner.spawn(smt_api_client::tasks::command::catch_commands(
+            _spawner.spawn(smartpot_iot::tasks::command::catch_commands(
                 COMMAND_CH.dyn_subscriber().unwrap(),
                 water,
                 lights,
@@ -160,20 +158,18 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
         /*
         let tca = Tca9548a::new(i2c_bus, 0x70);
         let [_, _, ch2, ch3, ch4, _, _, _] = tca.split();
-        spawner.spawn(smt_api_client::tasks::sensors::bme280_task_tca(
+        spawner.spawn(smartpot_iot::tasks::sensors::bme280_task_tca(
             ch2,
             SENSOR_CH.dyn_publisher().unwrap(),
             0x76));
-        spawner.spawn(smt_api_client::tasks::sensors::bme280_task_tca(
+        spawner.spawn(smartpot_iot::tasks::sensors::bme280_task_tca(
             ch3,
             SENSOR_CH.dyn_publisher().unwrap(),
             0x76));
-        spawner.spawn(smt_api_client::tasks::sensors::bme280_task_tca(
+        spawner.spawn(smartpot_iot::tasks::sensors::bme280_task_tca(
             ch4,
             SENSOR_CH.dyn_publisher().unwrap(),
             0x76));
-
-
         */
     };
 
@@ -202,10 +198,10 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
 
     #[cfg(feature = "wifi")]
     {
-        use smt_api_client::tasks::wifi::{net_task, wifi_connection_task};
+        use smartpot_iot::tasks::wifi::{net_task, wifi_connection_task};
 
         #[cfg(any(feature = "sensors", feature = "actuators", feature = "mqtt", feature = "http-api", feature = "ble"))]
-        use smt_api_client::{
+        use smartpot_iot::{
             events::telemetry::TELEMETRY_CH,
             tasks::wifi::telemetry_task
         };
@@ -261,14 +257,14 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
 
         // HTTP (DISABLE)
         #[cfg(all(feature = "http-api", feature = "sensors"))]
-        spawner.spawn(smt_api_client::tasks::wifi::http_api_task(
+        spawner.spawn(smartpot_iot::tasks::wifi::http_api_task(
             _stack,
             dtec.dyn_subscriber().unwrap(),
         ));
 
         // MQTT
         #[cfg(all(feature = "mqtt", feature = "actuators", feature = "sensors"))]
-        spawner.spawn(smt_api_client::tasks::mqtt::mqtt_task(
+        spawner.spawn(smartpot_iot::tasks::mqtt::mqtt_task(
             _stack,
             trng.clone(),
             TELEMETRY_CH.dyn_subscriber().unwrap(),

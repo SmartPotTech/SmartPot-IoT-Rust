@@ -1,9 +1,9 @@
 [package]
 edition      = "2024"
-name         = "smt-api-client"
+name         = "smartpot-iot"
 rust-version = "1.91"
 version      = "0.1.0"
-default-run = "smt-api-client"
+default-run = "smartpot-iot"
 
 [features]
 default = ["mqtt", "wifi", "sensors", "actuators"]
@@ -11,13 +11,12 @@ sensors = []
 actuators = []
 
 wifi = []
-http-api = []
-mqtt = []
+http-api = ["wifi"]
+mqtt = ["wifi"]
 ble = []
 
-
 [[bin]]
-name = "smt-api-client"
+name = "smartpot-iot"
 path = "src/bin/main.rs"
 
 [dependencies]
