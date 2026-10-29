@@ -188,3 +188,18 @@ El firmware fue validado de extremo a extremo mediante el script automatizado `t
 2. **Recepción y Ejecución de Comandos**: Se emitieron órdenes para los 4 actuadores (`WATER_PUMP`, `LIGHTS`, `FAN`, `HUMIDIFIER`), comprobando la emisión inmediata de ACKs `EXECUTED` con la duración formateada.
 3. **Rechazo de Comandos Inválidos**: Comandos con actuadores inexistentes provocan la respuesta inmediata `FAILED` con mensaje `"Comando inválido o actuador desconocido"`.
 4. **Ingesta de Telemetría**: Las muestras publicadas en `smartpot/v1/{cropId}/telemetry` son procesadas por la API Go y persistidas en TimescaleDB.
+
+---
+
+## 8. Simulación en Wokwi (diagram.json y wokwi.toml)
+
+De la misma manera que la versión previa en MicroPython, `SmartPot-IoT-Rust` está preparado para simularse de forma fidedigna en [Wokwi](https://wokwi.com):
+- **`diagram.json`**: Modela el esquema físico conectando el ESP32 con potenciómetros para las entradas analógicas ADC1 (TDS en GPIO 34, pH en GPIO 35, sustrato en GPIO 32), bus I2C para BME280 (SDA 21 / SCL 22) y 4 LEDs indicadores con resistencias para los actuadores (GPIO 25, 26, 27 y 5).
+- **`wokwi.toml`**: Apunta directamente al binario compilado por Rust `target/xtensa-esp32-none-elf/debug/smartpot-iot`.
+- **Ejecución local**:
+  * **PyCharm / CLion (JetBrains)**: Con el plugin oficial *Wokwi Simulator*, abriendo `diagram.json` e iniciando la simulación gráfica con el botón de reproducción verde.
+  * **VS Code**: Con la extensión *Wokwi Simulator* (`F1` -> *Wokwi: Start Simulator*).
+  * **Script de inicio**: Mediante `python start.py` para compilación y arranque automatizado.
+
+> [!NOTE]
+> `SmartPot-IoT-Rust` es un **firmware para microcontroladores físicos o simulación Wokwi**, no un servicio contenedor en el docker compose de `demo-beta`. La simulación en servidor de cultivos virtuales para la plataforma la provee `SmartPot-DataGenerator-Rust`.

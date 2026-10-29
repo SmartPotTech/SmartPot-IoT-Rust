@@ -87,10 +87,41 @@ SmartPot-IoT-Rust/
 │   └── lib.rs               # Exportaciones de biblioteca
 ├── tests/
 │   └── verify_contract_v1.py # Suite de integración y validación contra demo-beta
+├── diagram.json             # Circuito de Wokwi (sensores analógicos/I2C y actuadores LED)
+├── wokwi.toml               # Configuración de simulación local en Wokwi
+├── start.py                 # Script de arranque y verificación para simulación en Wokwi
 ├── Cargo.toml               # Dependencias embebidas y perfiles de compilación
 ├── README.md                # Este archivo
 └── rust-toolchain.toml      # Canal "esp" (Rust 1.90.0-nightly para Xtensa)
 ```
+
+## Simulación en Wokwi (Local, CLI y Plugins IDE)
+
+Al igual que la versión base en MicroPython, `SmartPot-IoT-Rust` cuenta con soporte nativo para el simulador **[Wokwi](https://wokwi.com)**, permitiendo probar todo el ciclo de telemetría y actuación sin necesidad de hardware físico:
+
+* **`diagram.json`**: Modela el circuito con la placa `board-esp32-devkit-c-v4`, los 3 potenciómetros ADC (TDS, pH, Sustrato), el sensor BME280 por I2C (GPIO 21/22) y los 4 LEDs indicadores con resistencias (Bomba, Luces, Ventilador, Humidificador).
+* **`wokwi.toml`**: Configura a Wokwi para ejecutar el binario ELF compilado por Rust (`target/xtensa-esp32-none-elf/debug/smartpot-iot`).
+* **Red virtual**: En Wokwi, la red WiFi predeterminada es `Wokwi-GUEST` (sin contraseña), que provee salida de red para comunicarse con el broker MQTT local o en la nube.
+
+### Opciones de Ejecución en Wokwi
+
+1. **Plugin de PyCharm / CLion (JetBrains)**:
+   - Instala el plugin **Wokwi Simulator** desde `Settings -> Plugins`.
+   - Abre el archivo `diagram.json` en el editor.
+   - Presiona el botón verde de **Play** ("Start Simulation") en la barra superior del editor de diagrama.
+2. **Extensión de VS Code**:
+   - Instala la extensión **Wokwi Simulator**.
+   - Presiona `F1` y selecciona `Wokwi: Start Simulator`.
+3. **Wokwi CLI y script de inicio**:
+   ```bash
+   # Compila el ELF y arranca la simulación (o muestra instrucciones)
+   python start.py
+   ```
+4. **Wokwi Web (wokwi.com)**:
+   - Carga el archivo `diagram.json` y el binario ELF compilado.
+
+> [!NOTE]
+> `SmartPot-IoT-Rust` es un **firmware embebido** concebido para ejecutarse en microcontroladores físicos ESP32 o en el simulador Wokwi. **No forma parte del despliegue Docker de `demo-beta`** (en el servidor, la simulación masiva de cultivos virtuales para pruebas la realiza `SmartPot-DataGenerator-Rust`).
 
 ## Compilación y Grabación
 
