@@ -39,15 +39,19 @@ jobs:
       - name: Ensure Cargo.lock exists
         run: |
           if [ ! -f Cargo.lock ]; then
-            cargo generate-lockfile
+            RUSTUP_TOOLCHAIN=stable cargo generate-lockfile
           fi
 
       - name: Run RustSec Cargo Audit
         run: |
-          cargo audit --format sarif > snyk.sarif || {
+          RUSTUP_TOOLCHAIN=stable cargo audit --format sarif > snyk.sarif || {
             code=$?
             echo "::warning::cargo-audit reportó avisos o vulnerabilidades en dependencias de Rust (código $code)."
           }
+          if [ ! -s snyk.sarif ] || ! grep -q '"runs"' snyk.sarif; then
+            echo "::warning::Reporte SARIF no generado o vacío; omitiendo carga a GitHub Security."
+            rm -f snyk.sarif
+          fi
 
       - name: Set up Snyk CLI
         uses: snyk/actions/setup@master
